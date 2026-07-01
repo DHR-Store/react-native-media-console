@@ -1,6 +1,6 @@
 {
-  "name": "@8man/react-native-media-console",
-  "version": "2.2.4-alpha.32",
+  "name": "@vega-next/react-native-media-console",
+  "version": "2.2.5",
   "description": "Controls for react-native-video",
   "license": "MIT",
   "source": "src/index",
@@ -13,10 +13,10 @@
     "react video player"
   ],
   "bugs": {},
-  "author": "Himanshu (https://github.com/himanshu8443)",
+  "author": "DHR-Store (https://github.com/DHR-Store)",
   "repository": {
     "type": "git",
-    "url": "git+ssh://git@github.com/himanshu8443/react-native-media-console"
+    "url": "git+ssh://git@github.com/DHR-Store/react-native-media-console"
   },
   "scripts": {
     "lint": "eslint ./src",

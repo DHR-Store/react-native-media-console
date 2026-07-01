@@ -21,7 +21,8 @@ import {PlatformSupport} from './OSSupport';
 import {_onBack} from './utils';
 import {_styles} from './styles';
 import type {VideoPlayerProps, WithRequiredProperty} from './types';
-import Gestures from '@8man/react-native-media-console/src/components/Gestures';
+// ✔️ CORRECT (Relative path import)
+import Gestures from './components/Gestures';
 
 const volumeWidth = 150;
 const iconOffset = 0;
@@ -40,7 +41,14 @@ const AnimatedVideoPlayer = (
     alwaysShowControls = false,
     paused = false,
     muted = false,
-    volume = 1,
+    // VLC-style 200 % boot volume.  The slider formula is:
+    //   volume = (sliderPosition / volumeWidth) * 2
+    // so volume=2 places the knob at the far-right (150 px) → ExoPlayer
+    // amplifies the audio signal to 200 % of the original level, exactly
+    // matching VLC's "150 %" or media-player "boost" mode.
+    // On iOS react-native-video clamps internally to 1.0; on Android
+    // ExoPlayer applies the gain without clamping (hardware permitting).
+    volume = 2,
     title = {primary: '', secondary: ''},
     rate = 1,
     showDuration = false,
@@ -97,13 +105,39 @@ const AnimatedVideoPlayer = (
   const [_playbackRate, setPlaybackRate] = useState<number>(rate);
   const [_showTimeRemaining, setShowTimeRemaining] =
     useState<boolean>(showTimeRemaining);
-  const [volumeTrackWidth, setVolumeTrackWidth] = useState<number>(0);
-  const [volumeFillWidth, setVolumeFillWidth] = useState<number>(0);
+
+  // ── FIX: Derive ALL four volume-slider state values from the volume prop
+  //         at construction time, not from 0.
+  //
+  //         Previous code initialised volumePosition/volumeFillWidth/volumeOffset
+  //         to 0 and relied on the init useEffect to correct them.  However React
+  //         effects run in declaration order: the TRACKING effect (depends on
+  //         [volumeFillWidth, volumePosition]) fired FIRST with position=0 and
+  //         scheduled a requestAnimationFrame that set _volume=0 and muted=true.
+  //         That rAF committed BEFORE the init effect's setVolumePosition(150)
+  //         was processed, so the Video component received volume=0,muted=true
+  //         on first render on several Android builds — and some ExoPlayer
+  //         versions held that muted state for the entire session.
+  //
+  //         Formula: volumeWidth (150 px) maps 0–200%, so position = (v/2)*150.
+  //         Clamp to [0, volumeWidth] to guard against out-of-range props.
+  const initialVolumePos = Math.min(
+    volumeWidth,
+    Math.max(0, volumeWidth * (volume / 2)),
+  );
+  const [volumeTrackWidth, setVolumeTrackWidth] = useState<number>(
+    Math.max(0, volumeWidth - initialVolumePos),
+  );
+  const [volumeFillWidth, setVolumeFillWidth] =
+    useState<number>(initialVolumePos);
   const [seekerFillWidth, setSeekerFillWidth] = useState<number>(0);
   const [showControls, setShowControls] = useState(showOnStart);
-  const [volumePosition, setVolumePositionState] = useState(0);
+  // volumePosition: the knob's pixel offset from the left of the slider track.
+  const [volumePosition, setVolumePositionState] = useState(initialVolumePos);
   const [seekerPosition, setSeekerPositionState] = useState(0);
-  const [volumeOffset, setVolumeOffset] = useState(0);
+  // volumeOffset: snapshot of volumePosition at the moment the user starts a
+  // drag; the pan responder adds gestureState.dx to this to get the new position.
+  const [volumeOffset, setVolumeOffset] = useState(initialVolumePos);
   const [seekerOffset, setSeekerOffset] = useState(0);
   const [seekerWidth, setSeekerWidth] = useState(0);
   const [seeking, setSeeking] = useState(false);
@@ -354,10 +388,13 @@ const AnimatedVideoPlayer = (
   );
 
   const constrainToVolumeMinMax = useCallback((val = 0) => {
+    // FIX: cap at volumeWidth (150), not volumeWidth+9 (159).
+    // The slider represents 0–200% across 0–150 px.
+    // Allowing 159 overflowed the fill bar and made volumeTrackWidth negative.
     if (val <= 0) {
       return 0;
-    } else if (val >= volumeWidth + 9) {
-      return volumeWidth + 9;
+    } else if (val >= volumeWidth) {
+      return volumeWidth;
     }
     return val;
   }, []);
@@ -390,33 +427,36 @@ const AnimatedVideoPlayer = (
     [constrainToVolumeMinMax],
   );
 
-  const seekVideo = useCallback((time: number) => {
-    try {
-      console.log('seekVideo called with time:', time);
-      console.log('videoRef.current:', !!videoRef?.current);
-      console.log('videoRef.current.seek:', !!videoRef?.current?.seek);
+  const seekVideo = useCallback(
+    (time: number) => {
+      try {
+        console.log('seekVideo called with time:', time);
+        console.log('videoRef.current:', !!videoRef?.current);
+        console.log('videoRef.current.seek:', !!videoRef?.current?.seek);
 
-      if (
-        videoRef?.current?.seek &&
-        typeof videoRef.current.seek === 'function'
-      ) {
-        console.log('Calling videoRef.current.seek with time:', time);
-        // Try seeking with tolerance parameter for better compatibility
-        videoRef.current.seek(time, 100);
-      } else if (videoRef?.current) {
-        // Fallback: try calling seek directly on the ref if available
-        console.log('Trying fallback seek method');
-        (videoRef.current as any).seek?.(time);
-      } else {
-        console.warn('Video seek function not available', {
-          ref: !!videoRef?.current,
-          seekFunction: !!videoRef?.current?.seek,
-        });
+        if (
+          videoRef?.current?.seek &&
+          typeof videoRef.current.seek === 'function'
+        ) {
+          console.log('Calling videoRef.current.seek with time:', time);
+          // Try seeking with tolerance parameter for better compatibility
+          videoRef.current.seek(time, 100);
+        } else if (videoRef?.current) {
+          // Fallback: try calling seek directly on the ref if available
+          console.log('Trying fallback seek method');
+          (videoRef.current as any).seek?.(time);
+        } else {
+          console.warn('Video seek function not available', {
+            ref: !!videoRef?.current,
+            seekFunction: !!videoRef?.current?.seek,
+          });
+        }
+      } catch (error) {
+        console.error('Error seeking video:', error);
       }
-    } catch (error) {
-      console.error('Error seeking video:', error);
-    }
-  }, []);
+    },
+    [videoRef],
+  );
 
   const {volumePanResponder, seekPanResponder} = usePanResponders({
     duration,
@@ -424,6 +464,11 @@ const AnimatedVideoPlayer = (
     volumeOffset,
     loading,
     seekerWidth,
+    // FIX: pass the constant slider width (150 px = absolute end = 200% volume)
+    // instead of the fill-remainder state variable.  The fill-remainder
+    // (volumeWidth - fill) approaches 0 as volume rises, so the old code
+    // computed maxVolumePosition = 0 at 200%, instantly muting any drag.
+    volumeTrackWidth: volumeWidth,
     seeking,
     seekerPosition,
     seek: seekVideo,
@@ -471,8 +516,18 @@ const AnimatedVideoPlayer = (
   useEffect(() => {
     if (_paused) {
       typeof events.onPause === 'function' && events.onPause();
+      // FIX: When the video pauses, immediately cancel the hide timer so
+      // controls stay on screen.  Also force them visible in case a prior
+      // auto-hide timer already fired right as the user hit pause.
+      clearControlTimeout();
+      setShowControls(true);
     } else {
       typeof events.onPlay === 'function' && events.onPlay();
+      // Video resumed: start auto-hide only if controls are currently visible
+      // (avoids scheduling a timer when controls are already hidden).
+      if (showControls) {
+        setControlTimeout();
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [_paused]);
@@ -527,7 +582,12 @@ const AnimatedVideoPlayer = (
   useEffect(() => {
     if (showControls) {
       animations.showControlAnimation();
-      setControlTimeout();
+      // FIX: Only start auto-hide timer when video is PLAYING.
+      // When paused, controls must stay visible indefinitely so the user
+      // can interact with seek bar, audio/subtitle pickers, etc.
+      if (!_paused) {
+        setControlTimeout();
+      }
       typeof events.onShowControls === 'function' && events.onShowControls();
     } else {
       animations.hideControlAnimation();
@@ -535,7 +595,7 @@ const AnimatedVideoPlayer = (
       typeof events.onHideControls === 'function' && events.onHideControls();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showControls, loading]);
+  }, [showControls, loading, _paused]);
 
   useEffect(() => {
     setMuted(muted);
@@ -550,7 +610,7 @@ const AnimatedVideoPlayer = (
     }
 
     updateVolumeRef.current = requestAnimationFrame(() => {
-      const newVolume = volumePosition / volumeWidth;
+      const newVolume = (volumePosition / volumeWidth) * 2;
 
       if (newVolume <= 0) {
         setMuted(true);
@@ -561,13 +621,11 @@ const AnimatedVideoPlayer = (
       setVolume(newVolume);
       setVolumeOffset(volumePosition);
 
-      const newVolumeTrackWidth = volumeWidth - volumeFillWidth;
-
-      if (newVolumeTrackWidth > 150) {
-        setVolumeTrackWidth(150);
-      } else {
-        setVolumeTrackWidth(newVolumeTrackWidth);
-      }
+      // FIX: clamp to [0, volumeWidth]. At 200% (fill=150) track=0 (fully
+      // filled); without the lower clamp it went negative (-9) which is
+      // an invalid React Native style width.
+      const newVolumeTrackWidth = Math.max(0, volumeWidth - volumeFillWidth);
+      setVolumeTrackWidth(newVolumeTrackWidth);
 
       updateVolumeRef.current = null;
     });
@@ -580,9 +638,9 @@ const AnimatedVideoPlayer = (
   }, [volumeFillWidth, volumePosition]);
 
   useEffect(() => {
-    const position = volumeWidth * _volume;
-    setVolumePosition(position);
-    setVolumeOffset(position);
+    // volumePosition / volumeFillWidth / volumeOffset are now initialised from
+    // the volume prop via useState(), so no position setup is needed here.
+    // Only lifecycle bookkeeping and frame-ref cleanup remain.
     mounted.current = true;
     return () => {
       mounted.current = false;
@@ -718,7 +776,6 @@ const AnimatedVideoPlayer = (
                     disablePlayPause={disablePlayPause}
                     disableSeekButtons={disableSeekButtons}
                     paused={_paused}
-                    // pauseLabel={pauseLabel}
                     togglePlayPause={togglePlayPause}
                     resetControlTimeout={resetControlTimeout}
                     showControls={showControls}
@@ -741,6 +798,23 @@ const AnimatedVideoPlayer = (
                   showControls={showControls}
                   disableGesture={disableGesture}
                   setPlayback={setPlaybackRate}
+                  // BUG FIX: wire the VLC-style gain boost.
+                  // Gestures reports an effectiveVolume in [0, 2]:
+                  //   0-1 → pure system-volume territory; keep gain at 1.0
+                  //         (VolumeManager already handled the system side)
+                  //   1-2 → system is maxed; raise ExoPlayer gain so the
+                  //         user actually hears amplification above 100%
+                  onVolumeChange={(effectiveVolume) => {
+                    // Convert the 0.0-2.0 volume back into slider pixels (0-150px)
+                    const newSliderPosition =
+                      (effectiveVolume / 2) * volumeWidth;
+
+                    // Update the slider UI position.
+                    // Because you have a useEffect listening to volumePosition,
+                    // this will automatically pass the 0.0-2.0 value to ExoPlayer
+                    // and trigger your native LoudnessEnhancer patch!
+                    setVolumePosition(newSliderPosition);
+                  }}
                 />
                 <BottomControls
                   animations={animations}

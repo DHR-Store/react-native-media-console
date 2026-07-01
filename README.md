@@ -7,5 +7,5 @@
 
 ## install
 ```
-npm install @8man/react-native-media-console
+npm install @vega-next/react-native-media-console
 ```

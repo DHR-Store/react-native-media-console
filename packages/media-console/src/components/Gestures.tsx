@@ -37,6 +37,11 @@ type GesturesProps = {
   showControls: boolean;
   disableGesture: boolean;
   setPlayback: (rate: number) => void;
+  // Callback for VLC-style 200% boost.
+  // Receives the full effective volume in [0, 2]:
+  //   0-1 → system volume is doing the work (gain stays at 1)
+  //   1-2 → system is maxed; parent should raise player gain to this value
+  onVolumeChange?: (effectiveVolume: number) => void;
 };
 
 const SWIPE_RANGE = 370;
@@ -155,6 +160,7 @@ const Gestures = ({
   showControls,
   disableGesture,
   setPlayback,
+  onVolumeChange,
 }: GesturesProps) => {
   const [rippleVisible, setRippleVisible] = useState(false);
   const [isLeftRipple, setIsLeftRipple] = useState(false);
@@ -343,11 +349,16 @@ const Gestures = ({
     ],
   );
 
-  const updateSystemVolume = useCallback((newVolume: number) => {
-    const clampedVolume = Math.max(0, Math.min(1, newVolume));
-    VolumeManager.setVolume(clampedVolume);
-    setDisplayVolume(clampedVolume);
-  }, []);
+  const updateSystemVolume = useCallback(
+    (newVolume: number) => {
+      // 1. Update the screen HUD (0 to 2.0 maps to 0% to 200%)
+      setDisplayVolume(newVolume);
+
+      // 2. Send the exact 0.0 - 2.0 value up to VideoPlayer.tsx
+      onVolumeChange?.(newVolume);
+    },
+    [onVolumeChange],
+  );
 
   const updateSystemBrightness = useCallback((newBrightness: number) => {
     const clampedBrightness = Math.max(0, Math.min(1, newBrightness));
@@ -388,7 +399,7 @@ const Gestures = ({
             // Volume control
             const newVolume = Math.max(
               0,
-              Math.min(1, startVolume.value + change),
+              Math.min(2, startVolume.value + change),
             );
             volumeValue.value = newVolume;
             runOnJS(updateSystemVolume)(newVolume);
@@ -513,60 +524,6 @@ const Gestures = ({
         clearTimeout(tapActionTimeout.current);
       }
     };
-  }, []);
-
-  // Initialize and store original settings
-  useEffect(() => {
-    let mounted = true;
-
-    const initializeSettings = async () => {
-      try {
-        const [currentVolume, currentBrightness] = await Promise.all([
-          VolumeManager.getVolume(),
-          Brightness.getBrightnessAsync(),
-        ]);
-
-        if (mounted) {
-          // Store original values
-          originalSettings.current = {
-            volume: currentVolume.volume,
-            brightness: currentBrightness,
-          };
-
-          // Set initial values
-          volumeValue.value = currentVolume.volume;
-          brightnessValue.value = currentBrightness;
-          setDisplayVolume(currentVolume.volume);
-          setDisplayBrightness(currentBrightness);
-        }
-      } catch (error) {
-        console.error('Error initializing settings:', error);
-      }
-    };
-
-    initializeSettings();
-
-    // Cleanup function
-    // return () => {
-    //   mounted = false;
-
-    //   const resetSettings = async () => {
-    //     try {
-    //       //   console.log('Resetting to original settings:🔥', originalSettings.current);
-
-    //       await Promise.all([
-    //         // SystemSetting.setVolume(originalSettings.current.volume),
-    //         SystemSetting.setAppBrightness(originalSettings.current.brightness),
-    //       ]);
-
-    //       //   console.log('Settings reset successfully');
-    //     } catch (error) {
-    //       console.error('Error resetting settings:', error);
-    //     }
-    //   };
-
-    //   resetSettings();
-    // };
   }, []);
 
   // Memoize container styles
