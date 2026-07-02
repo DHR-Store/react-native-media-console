@@ -1,4 +1,4 @@
-import {useRef} from 'react';
+import {useCallback, useMemo, useRef} from 'react';
 import {Animated} from 'react-native';
 import type {VideoAnimations} from '../types';
 
@@ -10,7 +10,7 @@ export const useJSAnimations = (
   const controlsOpacity = useRef(new Animated.Value(1)).current;
   const topControlTranslateY = useRef(new Animated.Value(0)).current;
 
-  const hideControlAnimation = () => {
+  const hideControlAnimation = useCallback(() => {
     Animated.parallel([
       Animated.timing(controlsOpacity, {
         toValue: 0,
@@ -28,9 +28,14 @@ export const useJSAnimations = (
         useNativeDriver: true,
       }),
     ]).start();
-  };
+  }, [
+    controlAnimationTiming,
+    controlsOpacity,
+    topControlTranslateY,
+    bottomControlTranslateY,
+  ]);
 
-  const showControlAnimation = () => {
+  const showControlAnimation = useCallback(() => {
     Animated.parallel([
       Animated.timing(controlsOpacity, {
         toValue: 1,
@@ -48,22 +53,46 @@ export const useJSAnimations = (
         useNativeDriver: true,
       }),
     ]).start();
-  };
+  }, [
+    controlAnimationTiming,
+    controlsOpacity,
+    topControlTranslateY,
+    bottomControlTranslateY,
+  ]);
 
-  const animations = {
-    bottomControl: {
-      transform: [{ translateY: bottomControlTranslateY }],
-    },
-    topControl: {
-      transform: [{ translateY: topControlTranslateY }],
-    },
-    controlsOpacity: {
-      opacity: controlsOpacity,
-    },
-    showControlAnimation,
-    hideControlAnimation,
-    AnimatedView: Animated.View,
-  } as unknown as VideoAnimations;
+  // BUG FIX: this object used to be rebuilt as a brand-new literal on every
+  // render, with no useMemo. Since `animations` is passed straight down as a
+  // prop to TopControls / BottomControls / Overlay / PlayPause / Gestures,
+  // a changing reference on every render defeated any memoization those
+  // components rely on and forced all of them to re-render every time the
+  // player re-rendered — including on every single touch-move frame while
+  // scrubbing or adjusting volume. The underlying Animated.Value instances
+  // are already stable (held in refs), so memoizing this object is safe and
+  // means it now only changes identity when it actually needs to.
+  const animations = useMemo(
+    () =>
+      ({
+        bottomControl: {
+          transform: [{translateY: bottomControlTranslateY}],
+        },
+        topControl: {
+          transform: [{translateY: topControlTranslateY}],
+        },
+        controlsOpacity: {
+          opacity: controlsOpacity,
+        },
+        showControlAnimation,
+        hideControlAnimation,
+        AnimatedView: Animated.View,
+      } as unknown as VideoAnimations),
+    [
+      bottomControlTranslateY,
+      topControlTranslateY,
+      controlsOpacity,
+      showControlAnimation,
+      hideControlAnimation,
+    ],
+  );
 
   return animations;
 };

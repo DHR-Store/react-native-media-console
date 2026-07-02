@@ -1,7 +1,7 @@
 import React, {Dispatch, SetStateAction} from 'react';
 import {View, GestureResponderHandlers} from 'react-native';
 import {styles} from './styles';
-import {formatTime} from '@8man/react-native-media-console/src/utils';
+import {formatTime} from '@vega-next/react-native-media-console/src/utils';
 import {Text} from 'react-native';
 
 interface SeekbarProps {

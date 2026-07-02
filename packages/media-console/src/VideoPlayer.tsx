@@ -135,10 +135,16 @@ const AnimatedVideoPlayer = (
   // volumePosition: the knob's pixel offset from the left of the slider track.
   const [volumePosition, setVolumePositionState] = useState(initialVolumePos);
   const [seekerPosition, setSeekerPositionState] = useState(0);
-  // volumeOffset: snapshot of volumePosition at the moment the user starts a
-  // drag; the pan responder adds gestureState.dx to this to get the new position.
-  const [volumeOffset, setVolumeOffset] = useState(initialVolumePos);
-  const [seekerOffset, setSeekerOffset] = useState(0);
+  // BUG FIX: the drag-start "offset" snapshots for the seek/volume sliders
+  // used to live here as component state (seekerOffset/volumeOffset) and
+  // were re-synced to the CURRENT position on every touch-move event. Since
+  // the pan responders compute `position = offset + cumulativeDx`, resetting
+  // offset on every move made that formula compound every single frame,
+  // sending the knob racing far ahead of the finger — the main cause of the
+  // seek bar/volume slider feeling laggy and unresponsive while dragging.
+  // They now live as plain refs *inside* usePanResponders, written exactly
+  // once per gesture (on grant), which is both correct and avoids firing
+  // extra re-renders on every drag frame.
   const [seekerWidth, setSeekerWidth] = useState(0);
   const [seeking, setSeeking] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -198,8 +204,6 @@ const AnimatedVideoPlayer = (
           Math.min(obj.currentTime || 0, duration),
         );
         setCurrentTime(validCurrentTime);
-
-        console.log('Seek completed:', obj);
 
         if (typeof onSeek === 'function') {
           onSeek(obj);
@@ -262,33 +266,21 @@ const AnimatedVideoPlayer = (
     (data: OnProgressData) => {
       setLoading(false);
       if (!seeking && !buffering) {
-        const newCurrentTime = data.currentTime;
-        const newCachedDuration = data.playableDuration;
-
-        // Update current time
-        setCurrentTime(newCurrentTime);
-        setCachedDuration(newCachedDuration);
-
-        // Update seekbar position based on current time and duration
-        if (duration > 0 && seekerWidth > 0) {
-          const progress = newCurrentTime / duration;
-          const position = progress * seekerWidth;
-          setSeekerPosition(position);
-        }
-
-        // Update cached position for buffer indicator
-        if (duration > 0 && seekerWidth > 0) {
-          const bufferProgress = newCachedDuration / duration;
-          const cachedPos = bufferProgress * seekerWidth;
-          setCachedPosition(cachedPos);
-        }
+        // Just record the raw values here. The seekbar fill / cached-buffer
+        // position are derived from currentTime/duration/seekerWidth by a
+        // single dedicated effect further down (throttled with rAF), which
+        // covers this progress-tick case AND rewind/forward/onEnd. Doing the
+        // same pixel math again here duplicated that work on every single
+        // progress tick for no benefit.
+        setCurrentTime(data.currentTime);
+        setCachedDuration(data.playableDuration);
 
         if (typeof onProgress === 'function') {
           onProgress(data);
         }
       }
     },
-    [seeking, buffering, onProgress, duration, seekerWidth],
+    [seeking, buffering, onProgress],
   );
 
   const _onScreenTouch = useCallback(() => {
@@ -331,7 +323,6 @@ const AnimatedVideoPlayer = (
       } else {
         setPaused(false);
       }
-      console.log(playBack);
     },
     [buffering],
   );
@@ -405,7 +396,6 @@ const AnimatedVideoPlayer = (
 
       // Batch state updates to prevent excessive re-renders
       setSeekerPositionState(positionValue);
-      setSeekerOffset(positionValue);
       setSeekerFillWidth(positionValue);
     },
     [constrainToSeekerMinMax],
@@ -430,20 +420,14 @@ const AnimatedVideoPlayer = (
   const seekVideo = useCallback(
     (time: number) => {
       try {
-        console.log('seekVideo called with time:', time);
-        console.log('videoRef.current:', !!videoRef?.current);
-        console.log('videoRef.current.seek:', !!videoRef?.current?.seek);
-
         if (
           videoRef?.current?.seek &&
           typeof videoRef.current.seek === 'function'
         ) {
-          console.log('Calling videoRef.current.seek with time:', time);
-          // Try seeking with tolerance parameter for better compatibility
+          // Seek with a tolerance parameter for better compatibility
           videoRef.current.seek(time, 100);
         } else if (videoRef?.current) {
           // Fallback: try calling seek directly on the ref if available
-          console.log('Trying fallback seek method');
           (videoRef.current as any).seek?.(time);
         } else {
           console.warn('Video seek function not available', {
@@ -460,8 +444,7 @@ const AnimatedVideoPlayer = (
 
   const {volumePanResponder, seekPanResponder} = usePanResponders({
     duration,
-    seekerOffset,
-    volumeOffset,
+    volumePosition,
     loading,
     seekerWidth,
     // FIX: pass the constant slider width (150 px = absolute end = 200% volume)
@@ -619,7 +602,6 @@ const AnimatedVideoPlayer = (
       }
 
       setVolume(newVolume);
-      setVolumeOffset(volumePosition);
 
       // FIX: clamp to [0, volumeWidth]. At 200% (fill=150) track=0 (fully
       // filled); without the lower clamp it went negative (-9) which is

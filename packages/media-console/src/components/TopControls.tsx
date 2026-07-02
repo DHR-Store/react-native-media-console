@@ -11,7 +11,7 @@ import {Back} from './Back';
 import {NullControl} from './NullControl';
 // import {styles} from './styles';
 import type {VideoAnimations} from '../types';
-import {Title} from '@8man/react-native-media-console/src/components/Title';
+import {Title} from '@vega-next/react-native-media-console/src/components/Title';
 
 interface TopControlProps {
   title: {primary: string; secondary?: string};

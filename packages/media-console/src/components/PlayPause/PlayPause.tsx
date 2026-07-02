@@ -10,7 +10,7 @@ import {Control} from '../Control';
 import {NullControl} from '../NullControl';
 import type {VideoAnimations} from '../../types';
 import {styles} from './styles';
-import {Loader} from '@8man/react-native-media-console/src/components/Loader';
+import {Loader} from '@vega-next/react-native-media-console/src/components/Loader';
 
 export const playPauseRef = createRef<TouchableHighlight>();
 
